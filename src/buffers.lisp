@@ -1,0 +1,146 @@
+(in-package :infinite-buffers)
+
+(defvar *default-buffer* (make-octet-array 0))
+
+(deftype legal-base-address () '(and fixnum (or (satisfies zerop) (satisfies power-of-two-p))))
+
+(declaim (inline copy-struct-buffer copy-class-buffer copy-standard-buffer
+		 struct-buffer-store struct-buffer-base-address struct-buffer-last-address))
+
+(defgeneric update-segment (manager segment requested-addr type))
+(defgeneric create-segment (manager &optional requested-addr))
+  
+(defstruct segment
+  (manager nil :read-only t)
+  (base-addr 0 :type legal-base-address)
+  (last-addr 0 :type legal-base-address)
+  (relative-addr 0 :type fixnum)
+  (target nil))
+
+(defun within-bounds (seg requested-addr)
+  (declare (type segment seg)
+	   (fixnum requested-addr)
+	   (optimize (speed 3)))
+  (and (<= (segment-base-addr seg) requested-addr)
+       (<= requested-addr (segment-last-addr seg))))
+
+(defun target-and-address (seg requested-addr)
+  (declare (type segment seg)
+	   (fixnum requested-addr)
+	   (optimize (speed 3)))
+  (if (within-bounds seg requested-addr)
+      (values (segment-target seg) (- requested-addr (segment-base-addr seg)))
+      (progn
+	(update-segment (segment-manager seg) seg requested-addr :absolute)
+	(values (segment-target seg) (- requested-addr (segment-base-addr seg))))))
+
+(defun next-target-and-address (seg)
+  (declare (type segment seq)
+	   (optimize (speed 3)))
+  (if (within-bounds seq (segment-relative-addr seg))
+      (values (segment-target seg) (post++ (segment-relative-addr seg)))
+      (progn
+	(update-segment (segment-manager seg) seg (segment-relative-addr seg) :relative)
+	(values (sement-target seg) (post++ (segment-relative-addr seg))))))
+      
+	
+
+(defstruct struct-buffer
+  (base-address 0 :type legal-base-address)
+  (last-address 0 :type legal-base-address)
+  (store *default-buffer* :type power-of-two-octet-array)
+  (at 0 :type fixnum))
+
+;;within striking distance of raw arrays, necessary since
+;;passing around raw arrays and tracking offsets via macro
+;;magic is going to be error prone to implement and use.
+;;bulk operations may make things better. For example, we
+;;can offer int operations that do the correct encoding as a parameter.
+;;to simplify things, only offer unsigned versions and offer
+;;signed->unsigned and unsigned->signed conversions for the first/final conversions.
+;;also offer signed->zigzag and zigzag->signed for the first/final conversions
+(defun copy-struct-buffer (sb index val)
+  (declare (type fixnum index)
+	   (type octet val)
+	   (optimize (speed 3)))
+  (let* ((ary (struct-buffer-store sb))
+	 (base (struct-buffer-base-address sb))
+	 (last (struct-buffer-last-address sb))
+	 (write-at (the fixnum (- index base))))
+    (if (< write-at last)
+	(setf (aref ary index) val)
+	(error "out of bounds"))
+    sb))
+
+(defclass class-buffer ()
+  ((base-address :initarg :base-address :reader base-address)
+   (last-address :initarg :last-address :reader last-address)
+   (store :initarg :store :reader store)
+   (at :initarg :at :reader at)))
+
+;; this gets really bad when you have to start accessing
+;; all of the slots. Looks like really need the struct to organize
+;; the fast computation, while the class stuff should only be for
+;; course grained policy control/bulk operations
+(defun copy-class-buffer (cb index val)
+  (declare (type fixnum index)
+	   (type octet val)
+	   (optimize (speed 3)))
+  (let* ((ary (the octet-array (slot-value cb 'store)))
+	 (base (the fixnum (slot-value cb 'base-address)))
+	 (last (the fixnum (slot-value cb 'last-address)))
+	 (write-at (the fixnum (- index base))))
+    (if (< write-at last)
+	(setf (aref ary index) val)
+	(error "out of bounds"))
+    cb))
+
+(defun copy-standard-buffer (ary ary-max index val)
+  (declare (type octet-array ary)
+	   (type fixnum ary-max index)
+	   (type octet val)
+	   (optimize (speed 3)))
+  (if (< index ary-max)
+      (setf (aref ary index) val)
+      (error "out of bounds"))
+  ary)
+
+;; well that's kind of good. struct is basically same as raw when everything is optimized
+;; class seems to be 2x slower no matter what. Really need to amortize slot access.
+(defun show-timings ()
+  (declare (optimize (speed 3)))
+  (let* ((num-runs 10000000)
+	 (size 64)
+	 (to-copy (make-octet-array size))
+	 (sb (make-struct-buffer :base-address 0 :last-address size :store (make-octet-array size) :at 0))
+	 (cb (make-instance 'class-buffer :base-address 0 :last-address size :store (make-octet-array size) :at 0))
+	 (ary (make-octet-array 64)))
+    (declare (type struct-buffer sb)
+	     (type class-buffer cb)
+	     (type octet-array ary))
+    
+    (dotimes (var size)
+      (setf (aref to-copy var) var))
+
+    (format t "Timings for struct buffer~%")
+    (time (loop for i from 0 below num-runs
+		do (loop for idx from 0 below size
+			 do (setf sb (copy-struct-buffer sb idx (aref to-copy idx))))))
+
+    (format t "Timings for class buffer~%")
+    (time (loop for i from 0 below num-runs
+		do (loop for idx from 0 below size
+			 do (setf cb (copy-class-buffer cb idx (aref to-copy idx))))))
+
+    (format t "Timings for standard buffer~%")
+    (time (loop for i from 0 below num-runs
+		do (loop for idx from 0 below size
+			 do (setf ary (copy-standard-buffer ary size idx (aref to-copy idx))))))
+
+
+    ))
+
+
+(defmacro stupid (method)
+  (let ((foo method))
+    `(,foo :blah 1 1.45f)))
