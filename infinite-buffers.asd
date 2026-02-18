@@ -9,6 +9,7 @@
 	       (:file "src/utils")
 	       (:file "src/io")
 	       (:file "src/buffers")
+	       (:file "src/segment")
 	       (:file "src/coding")))
 
 (defsystem #:infinite-buffers-test

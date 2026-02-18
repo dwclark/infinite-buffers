@@ -25,3 +25,14 @@
   (is (= (ib::max-sint 4) (ib::zigzag->sint (ib::sint->zigzag (ib::max-sint 4)))))
   (is (= (ib::min-sint 4) (ib::zigzag->sint (ib::sint->zigzag (ib::min-sint 4))))))
       
+(test test-int-encoding
+  (is (equalp (make-array 4 :element-type 'ib::octet :initial-contents '(#xDE #xAD #xBE #xEF))
+	      (let ((ary (make-array 4 :element-type 'ib::octet)))
+		(ib::int->writer :big-endian 4 aref ary 0 #xDEADBEEF)
+		ary))))
+
+(defun impl-test ()
+  (declare (optimize (speed 3)))
+  (let ((ary (make-array 4 :element-type 'ib::octet)))
+    (ib::int->writer :big-endian 4 aref ary 0 #xDEADBEEF)
+    ary))

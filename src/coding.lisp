@@ -57,13 +57,16 @@
 
 (defun %int->writer-fixed (encoding size writer-sym target-sym at-sym val-sym)
   (declare (type int-size size))
-  (loop with bits = (ash size 3)
-	with loads = (loop for bit-index from 0 below bits by 8
-			   collecting `(ldb (byte ,bits ,bit-index) ,val-sym))
-	for load in (if (eq encoding :little-endian) loads (reverse loads))
-	for index from 0 below size
-	collecting `(,writer-sym ,target-sym ,@(if at-sym `((+ ,index ,at-sym)) nil) ,load) into actions
-	finally (return `(progn ,@actions ,size))))
+  (once-only ((incf-by (if (eq encoding :big-endian) -8 8))
+	      (byte-index (if (eq encoding :big-endian) (* 8 (1- size)) 0)))
+    `(progn
+       (if (<= (+ 4 ,at-sym) ,size)
+	   (dotimes (var ,size)
+	     (setf (,writer-sym ,target-sym ,at-sym) (ldb (byte 8 ,byte-index) ,val-sym))
+	     (incf ,at-sym)
+	     (incf ,byte-index ,incf-by))
+	   (format t "skipping ~%"))
+       ,size)))
 
 (defun %int->writer-variable (encoding writer-sym target-sym at-sym val-sym)
   (let ((mask (lognot #x7f)))
@@ -79,9 +82,9 @@
 (defmacro int->writer (encoding size writer target at val)
   (declare (type byte-encoding encoding))
   
-  (once-only (writer target val)
+  (once-only (target val)
     (ecase encoding
-      (:little-endian :big-endian
+      ((:little-endian :big-endian)
        (if (null at)
 	   (%int->writer-fixed encoding size writer target nil val)
 	   (once-only (at)

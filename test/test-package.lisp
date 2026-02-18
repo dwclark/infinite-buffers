@@ -1,4 +1,3 @@
 (defpackage :infinite-buffers-test
-  (:use #:cl #:5am)
-  (:local-nicknames (#:ib #:infinite-buffers)))
+  (:use #:cl #:5am #:infinite-buffers))
 
